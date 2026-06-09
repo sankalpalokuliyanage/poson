@@ -1,6 +1,9 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { Suspense, useState, useEffect } from 'react';
+import { Canvas } from '@react-three/fiber';
+import { OrbitControls, useGLTF } from '@react-three/drei';
+import { ARButton, XR } from '@react-three/xr';
 
-// SVG Icons to prevent any third-party package errors
+// Safe SVG Icons to replace external dependencies completely
 const SparklesIcon = () => (
   <svg className="w-4 h-4 text-teal-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
     <path strokeLinecap="round" strokeLinejoin="round" d="M5 3v4M3 5h4M6 17v4m-2-2h4m5-16l2.286 6.857L21 12l-5.714 2.143L13 21l-2.286-6.857L5 12l5.714-2.143L13 3z" />
@@ -31,240 +34,102 @@ const LoaderIcon = () => (
   </svg>
 );
 
-export default function App() {
-  const [scriptsLoaded, setScriptsLoaded] = useState(false);
-  const [arActive, setArActive] = useState(false);
-  const [loadingModel, setLoadingModel] = useState(true);
-  const [errorMsg, setErrorMsg] = useState('');
+// React Error Boundary to catch 3D loading errors (e.g. 404 GLB file missing) and show fallback mesh instead of crashing
+class ModelErrorBoundary extends React.Component {
+  constructor(props) {
+    super(props);
+    this.state = { hasError: false };
+  }
+  static getDerivedStateFromError(error) {
+    return { hasError: true };
+  }
+  componentDidCatch(error, errorInfo) {
+    console.warn("GLB model failed to load. Using beautiful fallback mesh instead.", error, errorInfo);
+  }
+  render() {
+    if (this.state.hasError) {
+      return this.props.fallback;
+    }
+    return this.props.children;
+  }
+}
+
+// Stylized Golden 3D Figurine representing King Devanampiyatissa if GLB is missing
+function FallbackKingModel() {
+  return (
+    <group position={[0, 0, 0]}>
+      {/* Base Pedestal */}
+      <mesh position={[0, 0.075, 0]} castShadow receiveShadow>
+        <cylinderGeometry args={[0.4, 0.45, 0.15, 32]} />
+        <meshStandardMaterial color="#1e293b" roughness={0.8} />
+      </mesh>
+      {/* Body / Golden Robe */}
+      <mesh position={[0, 0.75, 0]} castShadow receiveShadow>
+        <cylinderGeometry args={[0.15, 0.25, 1.2, 16]} />
+        <meshStandardMaterial color="#d97706" roughness={0.5} metalness={0.1} />
+      </mesh>
+      {/* Head / Golden Crown */}
+      <mesh position={[0, 1.4, 0]} castShadow receiveShadow>
+        <sphereGeometry args={[0.15, 16, 16]} />
+        <meshStandardMaterial color="#f59e0b" metalness={0.7} roughness={0.2} />
+      </mesh>
+    </group>
+  );
+}
+
+// King Tissa 3D GLTF Loader Component
+function KingTissaModel({ onLoadSuccess }) {
+  // Use Vite public folder asset resolution safely
+  const { scene } = useGLTF('/models/king_tissa.glb');
   
-  const canvasRef = useRef(null);
-  const rendererRef = useRef(null);
-  const sceneRef = useRef(null);
-  const cameraRef = useRef(null);
-  const controlsRef = useRef(null);
-  const modelRef = useRef(null);
-
-  // Safe script injector that prevents double loading in React Strict Mode
   useEffect(() => {
-    let active = true;
+    if (scene && onLoadSuccess) {
+      onLoadSuccess();
+    }
+  }, [scene, onLoadSuccess]);
 
-    const loadScript = (id, src) => {
-      return new Promise((resolve, reject) => {
-        const existing = document.getElementById(id);
-        if (existing) {
-          if (existing.dataset.loaded === 'true') {
-            resolve();
-          } else {
-            existing.addEventListener('load', resolve);
-            existing.addEventListener('error', reject);
-          }
-          return;
+  return (
+    <primitive 
+      object={scene} 
+      position={[0, 0, 0]} 
+      scale={[0.8, 0.8, 0.8]} 
+      castShadow
+      receiveShadow
+    />
+  );
+}
+
+// Standard WebGL Loader mesh placeholder inside Canvas
+function LoaderPlaceholder() {
+  return (
+    <mesh position={[0, 0.7, 0]}>
+      <boxGeometry args={[0.4, 0.4, 0.4]} />
+      <meshStandardMaterial color="#0ea5e9" wireframe />
+    </mesh>
+  );
+}
+
+export default function App() {
+  const [modelLoading, setModelLoading] = useState(true);
+  const [errorMsg, setErrorMsg] = useState('');
+
+  // Check if WebXR is supported when page loads
+  useEffect(() => {
+    if (navigator.xr) {
+      navigator.xr.isSessionSupported('immersive-ar').then((supported) => {
+        if (!supported) {
+          setErrorMsg('WebXR AR is not fully supported on this browser. For best experience, open Vercel HTTPS link on Android Chrome or Mozilla WebXR Viewer on iOS.');
         }
-
-        const script = document.createElement('script');
-        script.id = id;
-        script.src = src;
-        script.async = true;
-        script.dataset.loaded = 'false';
-        script.onload = () => {
-          script.dataset.loaded = 'true';
-          resolve();
-        };
-        script.onerror = reject;
-        document.head.appendChild(script);
       });
-    };
-
-    const init = async () => {
-      try {
-        // Load main Three.js first
-        await loadScript('three-core', 'https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js');
-        if (!active) return;
-        
-        // Load addons
-        await Promise.all([
-          loadScript('three-gltf', 'https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/GLTFLoader.js'),
-          loadScript('three-orbit', 'https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js')
-        ]);
-        
-        if (active) {
-          setScriptsLoaded(true);
-        }
-      } catch (err) {
-        if (active) {
-          setErrorMsg('Error loading 3D graphics libraries. Please check your internet connection.');
-          console.error(err);
-        }
-      }
-    };
-
-    init();
-
-    return () => {
-      active = false;
-    };
+    } else {
+      setErrorMsg('WebXR is missing on this device. Please use a modern mobile browser (Chrome/Safari) with HTTPS connection.');
+    }
   }, []);
-
-  // Initialize the 3D Scene and Renderer
-  useEffect(() => {
-    if (!scriptsLoaded || !canvasRef.current) return;
-
-    const THREE = window.THREE;
-    
-    // Create Scene, Camera, and WebGL Renderer
-    const scene = new THREE.Scene();
-    sceneRef.current = scene;
-
-    const camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 100);
-    camera.position.set(0, 1.5, 3);
-    cameraRef.current = camera;
-
-    const renderer = new THREE.WebGLRenderer({
-      canvas: canvasRef.current,
-      antialias: true,
-      alpha: true
-    });
-    
-    // Fix: Handle cases where clientWidth/clientHeight are initially 0
-    const width = canvasRef.current.clientWidth || window.innerWidth;
-    const height = canvasRef.current.clientHeight || window.innerHeight;
-    renderer.setSize(width, height);
-    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-    renderer.shadowMap.enabled = true;
-    renderer.xr.enabled = true; 
-    rendererRef.current = renderer;
-
-    // Controls for mouse/touch preview
-    const controls = new THREE.OrbitControls(camera, renderer.domElement);
-    controls.enableDamping = true;
-    controls.dampingFactor = 0.05;
-    controls.maxPolarAngle = Math.PI / 2.1;
-    controls.minDistance = 1;
-    controls.maxDistance = 10;
-    controlsRef.current = controls;
-
-    // Meditative temple-like lighting
-    const ambientLight = new THREE.AmbientLight(0xffffff, 0.8);
-    scene.add(ambientLight);
-
-    const dirLight = new THREE.DirectionalLight(0xffffff, 1.2);
-    dirLight.position.set(5, 10, 5);
-    dirLight.castShadow = true;
-    scene.add(dirLight);
-
-    // Load the King Tissa GLB model
-    const loader = new THREE.GLTFLoader();
-    loader.load(
-      '/models/king_tissa.glb',
-      (gltf) => {
-        const model = gltf.scene;
-        model.position.set(0, 0, 0);
-        model.scale.set(0.8, 0.8, 0.8);
-        
-        model.traverse((node) => {
-          if (node.isMesh) {
-            node.castShadow = true;
-            node.receiveShadow = true;
-          }
-        });
-
-        scene.add(model);
-        modelRef.current = model;
-        setLoadingModel(false);
-      },
-      undefined,
-      (error) => {
-        console.warn('GLB load failed, creating beautiful fallback representation...', error);
-        
-        // Dynamic Fallback model representing King Tissa if file path is empty/unresolved
-        const group = new THREE.Group();
-        
-        // Base Pedestal
-        const baseGeo = new THREE.CylinderGeometry(0.4, 0.45, 0.15, 32);
-        const baseMat = new THREE.MeshStandardMaterial({ color: 0x1e293b, roughness: 0.8 });
-        const baseMesh = new THREE.Mesh(baseGeo, baseMat);
-        baseMesh.position.y = 0.075;
-        group.add(baseMesh);
-
-        // Body robe
-        const bodyGeo = new THREE.CylinderGeometry(0.15, 0.25, 1.2, 16);
-        const bodyMat = new THREE.MeshStandardMaterial({ color: 0xd97706, roughness: 0.5 }); // Golden Robe
-        const bodyMesh = new THREE.Mesh(bodyGeo, bodyMat);
-        bodyMesh.position.y = 0.75;
-        group.add(bodyMesh);
-
-        // Crown/Head
-        const headGeo = new THREE.SphereGeometry(0.15, 16, 16);
-        const headMat = new THREE.MeshStandardMaterial({ color: 0xf59e0b, metalness: 0.6, roughness: 0.2 });
-        const headMesh = new THREE.Mesh(headGeo, headMat);
-        headMesh.position.y = 1.4;
-        group.add(headMesh);
-
-        group.position.set(0, 0, 0);
-        scene.add(group);
-        modelRef.current = group;
-        setLoadingModel(false);
-      }
-    );
-
-    const handleResize = () => {
-      if (!canvasRef.current) return;
-      const w = canvasRef.current.clientWidth || window.innerWidth;
-      const h = canvasRef.current.clientHeight || window.innerHeight;
-      camera.aspect = w / h;
-      camera.updateProjectionMatrix();
-      renderer.setSize(w, h);
-    };
-    window.addEventListener('resize', handleResize);
-
-    // Active Render loop
-    renderer.setAnimationLoop(() => {
-      if (controls && !renderer.xr.isPresenting) {
-        controls.update();
-      }
-      
-      // Auto-rotate preview if not in immersive AR session
-      if (modelRef.current && !renderer.xr.isPresenting) {
-        modelRef.current.rotation.y += 0.005;
-      }
-
-      renderer.render(scene, camera);
-    });
-
-    return () => {
-      window.removeEventListener('resize', handleResize);
-      renderer.setAnimationLoop(null);
-    };
-  }, [scriptsLoaded]);
-
-  // AR Session Activation
-  const startARSession = async () => {
-    if (!navigator.xr) {
-      setErrorMsg('WebXR AR is not supported on this device. Please open this Vercel link using Chrome on Android, or the WebXR Viewer app on iOS.');
-      return;
-    }
-
-    try {
-      const session = await navigator.xr.requestSession('immersive-ar', {
-        requiredFeatures: ['local-floor']
-      });
-
-      rendererRef.current.xr.setSession(session);
-      setArActive(true);
-
-      session.addEventListener('end', () => {
-        setArActive(false);
-      });
-    } catch (err) {
-      console.error('AR session initialization failed:', err);
-      setErrorMsg('Could not start AR session. Please make sure camera permissions are enabled for this browser.');
-    }
-  };
 
   return (
     <div className="relative w-screen h-screen bg-slate-950 text-slate-100 flex flex-col overflow-hidden font-sans">
       
-      {/* HEADER OVERLAY */}
+      {/* HEADER OVERLAY (Placed OUTSIDE Canvas to prevent namespace errors) */}
       <header className="absolute top-0 inset-x-0 z-10 p-4 bg-gradient-to-b from-slate-950/90 to-transparent backdrop-blur-xs flex items-center justify-between pointer-events-none">
         <div className="flex items-center gap-2 pointer-events-auto">
           <div className="w-8 h-8 rounded-lg bg-teal-500/10 border border-teal-500/30 flex items-center justify-center">
@@ -278,29 +143,50 @@ export default function App() {
 
         <div className="bg-slate-900/80 border border-slate-800 rounded-lg px-2.5 py-1 text-[10px] font-semibold text-teal-400 flex items-center gap-1.5 pointer-events-auto">
           <span className="w-1.5 h-1.5 rounded-full bg-teal-500 animate-pulse inline-block"></span>
-          El AR Gahez
+          AR Ready
         </div>
       </header>
 
-      {/* THREE.JS CANVAS */}
-      <div className="absolute inset-0 w-full h-full z-0">
-        <canvas ref={canvasRef} className="w-full h-full block" />
-      </div>
-
-      {/* LOADING & ERROR STATES */}
-      {loadingModel && !errorMsg && (
-        <div className="absolute inset-0 z-20 flex flex-col items-center justify-center bg-slate-950/80 backdrop-blur-sm gap-3">
-          <LoaderIcon />
-          <p className="text-sm text-slate-300">Bey7amel el model bta3 el Malek...</p>
-        </div>
-      )}
-
+      {/* ERROR MESSAGE DISPLAY */}
       {errorMsg && (
         <div className="absolute top-16 left-4 right-4 z-30 bg-red-500/10 border border-red-500/20 p-3 rounded-xl flex items-start gap-2.5 backdrop-blur-md">
           <AlertTriangleIcon />
           <p className="text-xs text-red-300 leading-relaxed">{errorMsg}</p>
         </div>
       )}
+
+      {/* THREE.JS CANVAS CONTAINER */}
+      <div className="absolute inset-0 w-full h-full z-0">
+        <Canvas shadows camera={{ position: [0, 1.5, 3], fov: 45 }}>
+          {/* Meditative golden/white ambient environment lighting */}
+          <ambientLight intensity={0.7} />
+          <directionalLight 
+            position={[5, 10, 5]} 
+            intensity={1.2} 
+            castShadow 
+            shadow-mapSize={[1024, 1024]} 
+          />
+          <pointLight position={[-5, 5, -5]} intensity={0.5} />
+
+          {/* WebXR immersive setup */}
+          <XR>
+            <Suspense fallback={<LoaderPlaceholder />}>
+              <ModelErrorBoundary fallback={<FallbackKingModel />}>
+                <KingTissaModel onLoadSuccess={() => setModelLoading(false)} />
+              </ModelErrorBoundary>
+            </Suspense>
+          </XR>
+
+          {/* Fallback interactive controls for normal web screen viewing */}
+          <OrbitControls 
+            enableDamping 
+            dampingFactor={0.05} 
+            maxPolarAngle={Math.PI / 2} 
+            minDistance={1} 
+            maxDistance={10} 
+          />
+        </Canvas>
+      </div>
 
       {/* BOTTOM CONTROL PANEL */}
       <section className="absolute bottom-0 inset-x-0 z-10 p-6 bg-gradient-to-t from-slate-950 via-slate-950/80 to-transparent flex flex-col items-center gap-4">
@@ -318,16 +204,18 @@ export default function App() {
           </ul>
         </div>
 
-        {/* Trigger AR Button */}
-        <div className="w-full max-w-md">
-          <button
-            onClick={startARSession}
-            disabled={!scriptsLoaded || loadingModel}
-            className="w-full py-3.5 px-6 bg-teal-600 hover:bg-teal-500 disabled:bg-slate-800 disabled:text-slate-500 text-white rounded-xl font-bold text-sm shadow-lg transition-all border-none cursor-pointer flex items-center justify-center"
+        {/* Trigger AR Button via R3F XR Wrapper */}
+        <div className="w-full max-w-md flex justify-center pointer-events-auto">
+          <ARButton
+            sessionInit={{
+              requiredFeatures: ['local-floor', 'hit-test'],
+              optionalFeatures: ['hand-tracking']
+            }}
+            className="w-full !py-3.5 !px-6 !bg-teal-600 hover:!bg-teal-500 !text-white !rounded-xl !font-bold !text-sm !shadow-lg !transition-all !border-none !cursor-pointer flex items-center justify-center gap-2"
           >
             <SmartphoneIcon />
             Abda2 el AR (Hat el Malek fel koda)
-          </button>
+          </ARButton>
         </div>
 
         <p className="text-[10px] text-slate-500 text-center">
@@ -338,3 +226,6 @@ export default function App() {
     </div>
   );
 }
+
+// Preload assets for immediate performance
+useGLTF.preload('/models/king_tissa.glb');
