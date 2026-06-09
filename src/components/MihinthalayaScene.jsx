@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 
-// Inline SVG Icon components to replace lucide-react dependencies
+// SVG Icons to prevent any third-party package errors
 const SparklesIcon = () => (
   <svg className="w-4 h-4 text-teal-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
     <path strokeLinecap="round" strokeLinejoin="round" d="M5 3v4M3 5h4M6 17v4m-2-2h4m5-16l2.286 6.857L21 12l-5.714 2.143L13 21l-2.286-6.857L5 12l5.714-2.143L13 3z" />
@@ -44,44 +44,74 @@ export default function App() {
   const controlsRef = useRef(null);
   const modelRef = useRef(null);
 
-  // 1. Load el scripts bto3 Three.js dynamically 3ashan nethada el mashakel bta3et el compilation
+  // Safe script injector that prevents double loading in React Strict Mode
   useEffect(() => {
-    const loadScript = (src) => {
+    let active = true;
+
+    const loadScript = (id, src) => {
       return new Promise((resolve, reject) => {
+        const existing = document.getElementById(id);
+        if (existing) {
+          if (existing.dataset.loaded === 'true') {
+            resolve();
+          } else {
+            existing.addEventListener('load', resolve);
+            existing.addEventListener('error', reject);
+          }
+          return;
+        }
+
         const script = document.createElement('script');
+        script.id = id;
         script.src = src;
         script.async = true;
-        script.onload = resolve;
+        script.dataset.loaded = 'false';
+        script.onload = () => {
+          script.dataset.loaded = 'true';
+          resolve();
+        };
         script.onerror = reject;
         document.head.appendChild(script);
       });
     };
 
-    Promise.all([
-      loadScript('https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js')
-    ])
-      .then(() => {
-        return Promise.all([
-          loadScript('https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/GLTFLoader.js'),
-          loadScript('https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js')
+    const init = async () => {
+      try {
+        // Load main Three.js first
+        await loadScript('three-core', 'https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js');
+        if (!active) return;
+        
+        // Load addons
+        await Promise.all([
+          loadScript('three-gltf', 'https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/GLTFLoader.js'),
+          loadScript('three-orbit', 'https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js')
         ]);
-      })
-      .then(() => {
-        setScriptsLoaded(true);
-      })
-      .catch((err) => {
-        setErrorMsg('Moshkela fe ta7mel el libraries bta3et el 3D.');
-        console.error(err);
-      });
+        
+        if (active) {
+          setScriptsLoaded(true);
+        }
+      } catch (err) {
+        if (active) {
+          setErrorMsg('Error loading 3D graphics libraries. Please check your internet connection.');
+          console.error(err);
+        }
+      }
+    };
+
+    init();
+
+    return () => {
+      active = false;
+    };
   }, []);
 
-  // 2. Initialize el scene w load model bta3 el Malek Tissa
+  // Initialize the 3D Scene and Renderer
   useEffect(() => {
     if (!scriptsLoaded || !canvasRef.current) return;
 
     const THREE = window.THREE;
     
-    // El Scene, Camera, w Renderer
+    // Create Scene, Camera, and WebGL Renderer
     const scene = new THREE.Scene();
     sceneRef.current = scene;
 
@@ -94,22 +124,26 @@ export default function App() {
       antialias: true,
       alpha: true
     });
-    renderer.setSize(canvasRef.current.clientWidth, canvasRef.current.clientHeight);
+    
+    // Fix: Handle cases where clientWidth/clientHeight are initially 0
+    const width = canvasRef.current.clientWidth || window.innerWidth;
+    const height = canvasRef.current.clientHeight || window.innerHeight;
+    renderer.setSize(width, height);
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     renderer.shadowMap.enabled = true;
-    renderer.xr.enabled = true; // Enable el WebXR support
+    renderer.xr.enabled = true; 
     rendererRef.current = renderer;
 
-    // OrbitControls le preview el 3D 3ala el shasha
+    // Controls for mouse/touch preview
     const controls = new THREE.OrbitControls(camera, renderer.domElement);
     controls.enableDamping = true;
     controls.dampingFactor = 0.05;
-    controls.maxPolarAngle = Math.PI / 2;
+    controls.maxPolarAngle = Math.PI / 2.1;
     controls.minDistance = 1;
     controls.maxDistance = 10;
     controlsRef.current = controls;
 
-    // Edawaat (Lights)
+    // Meditative temple-like lighting
     const ambientLight = new THREE.AmbientLight(0xffffff, 0.8);
     scene.add(ambientLight);
 
@@ -118,7 +152,7 @@ export default function App() {
     dirLight.castShadow = true;
     scene.add(dirLight);
 
-    // Load el model bta3 el malek Tissa men public folder
+    // Load the King Tissa GLB model
     const loader = new THREE.GLTFLoader();
     loader.load(
       '/models/king_tissa.glb',
@@ -127,7 +161,6 @@ export default function App() {
         model.position.set(0, 0, 0);
         model.scale.set(0.8, 0.8, 0.8);
         
-        // Dynamic shadow casting for realism
         model.traverse((node) => {
           if (node.isMesh) {
             node.castShadow = true;
@@ -141,35 +174,56 @@ export default function App() {
       },
       undefined,
       (error) => {
-        console.warn('GLB load failed, loading fallback 3D shape...', error);
+        console.warn('GLB load failed, creating beautiful fallback representation...', error);
         
-        // Fallback model representation low el path mesh mawgoud
-        const geometry = new THREE.CylinderGeometry(0.2, 0.3, 1.4, 16);
-        const material = new THREE.MeshStandardMaterial({ color: 0x0ea5e9, roughness: 0.4 });
-        const fallbackMesh = new THREE.Mesh(geometry, material);
-        fallbackMesh.position.set(0, 0.7, 0);
-        scene.add(fallbackMesh);
-        modelRef.current = fallbackMesh;
+        // Dynamic Fallback model representing King Tissa if file path is empty/unresolved
+        const group = new THREE.Group();
+        
+        // Base Pedestal
+        const baseGeo = new THREE.CylinderGeometry(0.4, 0.45, 0.15, 32);
+        const baseMat = new THREE.MeshStandardMaterial({ color: 0x1e293b, roughness: 0.8 });
+        const baseMesh = new THREE.Mesh(baseGeo, baseMat);
+        baseMesh.position.y = 0.075;
+        group.add(baseMesh);
+
+        // Body robe
+        const bodyGeo = new THREE.CylinderGeometry(0.15, 0.25, 1.2, 16);
+        const bodyMat = new THREE.MeshStandardMaterial({ color: 0xd97706, roughness: 0.5 }); // Golden Robe
+        const bodyMesh = new THREE.Mesh(bodyGeo, bodyMat);
+        bodyMesh.position.y = 0.75;
+        group.add(bodyMesh);
+
+        // Crown/Head
+        const headGeo = new THREE.SphereGeometry(0.15, 16, 16);
+        const headMat = new THREE.MeshStandardMaterial({ color: 0xf59e0b, metalness: 0.6, roughness: 0.2 });
+        const headMesh = new THREE.Mesh(headGeo, headMat);
+        headMesh.position.y = 1.4;
+        group.add(headMesh);
+
+        group.position.set(0, 0, 0);
+        scene.add(group);
+        modelRef.current = group;
         setLoadingModel(false);
       }
     );
 
-    // Resize handler
     const handleResize = () => {
       if (!canvasRef.current) return;
-      camera.aspect = canvasRef.current.clientWidth / canvasRef.current.clientHeight;
+      const w = canvasRef.current.clientWidth || window.innerWidth;
+      const h = canvasRef.current.clientHeight || window.innerHeight;
+      camera.aspect = w / h;
       camera.updateProjectionMatrix();
-      renderer.setSize(canvasRef.current.clientWidth, canvasRef.current.clientHeight);
+      renderer.setSize(w, h);
     };
     window.addEventListener('resize', handleResize);
 
-    // Render loop bta3 Three.js (Must use setAnimationLoop for WebXR)
+    // Active Render loop
     renderer.setAnimationLoop(() => {
       if (controls && !renderer.xr.isPresenting) {
         controls.update();
       }
       
-      // El circular rotation low mesh fey el AR 3ashan yb2a interactive
+      // Auto-rotate preview if not in immersive AR session
       if (modelRef.current && !renderer.xr.isPresenting) {
         modelRef.current.rotation.y += 0.005;
       }
@@ -183,10 +237,10 @@ export default function App() {
     };
   }, [scriptsLoaded]);
 
-  // 3. Start el WebXR Immersive AR session
+  // AR Session Activation
   const startARSession = async () => {
     if (!navigator.xr) {
-      setErrorMsg('El AR mesh mad3om 3ala el mo3tal da. Yareet testa3mel Chrome aw Safari 3ala mobail fih ARCore.');
+      setErrorMsg('WebXR AR is not supported on this device. Please open this Vercel link using Chrome on Android, or the WebXR Viewer app on iOS.');
       return;
     }
 
@@ -202,8 +256,8 @@ export default function App() {
         setArActive(false);
       });
     } catch (err) {
-      console.error('Moshkela fey bdayat el AR:', err);
-      setErrorMsg('Mesh aref abda2 el AR. Yareet teta2ked men permissions bta3et el camera.');
+      console.error('AR session initialization failed:', err);
+      setErrorMsg('Could not start AR session. Please make sure camera permissions are enabled for this browser.');
     }
   };
 
