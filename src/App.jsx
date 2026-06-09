@@ -1,202 +1,56 @@
-import React, { useState, useEffect, useRef } from 'react';
-
-// Inline SVGs for zero dependencies
-const SparklesIcon = () => (
-  <svg className="w-4 h-4 text-teal-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
-    <path strokeLinecap="round" strokeLinejoin="round" d="M5 3v4M3 5h4M6 17v4m-2-2h4m5-16l2.286 6.857L21 12l-5.714 2.143L13 21l-2.286-6.857L5 12l5.714-2.143L13 3z" />
-  </svg>
-);
-
-const SmartphoneIcon = () => (
-  <svg className="w-4 h-4 inline mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
-    <path strokeLinecap="round" strokeLinejoin="round" d="M12 18h.01M8 21h8a2 2 0 002-2V5a2 2 0 00-2-2H8a2 2 0 00-2 2v14a2 2 0 002 2z" />
-  </svg>
-);
+import React from 'react';
+import '@google/model-viewer'; // මුලින්ම terminal එකේ 'npm install @google/model-viewer' කරලා ඉන්න.
 
 export default function App() {
-  const [scriptsLoaded, setScriptsLoaded] = useState(false);
-  const [loadingModel, setLoadingModel] = useState(true);
-  const [errorMsg, setErrorMsg] = useState('');
-  
-  const canvasRef = useRef(null);
-  const rendererRef = useRef(null);
-  const sceneRef = useRef(null);
-  const cameraRef = useRef(null);
-  const modelRef = useRef(null);
-
-  // 1. Load Three.js dynamically to prevent build crashes
-  useEffect(() => {
-    const loadScript = (src) => {
-      return new Promise((resolve, reject) => {
-        const script = document.createElement('script');
-        script.src = src;
-        script.async = true;
-        script.onload = resolve;
-        script.onerror = reject;
-        document.head.appendChild(script);
-      });
-    };
-
-    loadScript('https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js')
-      .then(() => {
-        return Promise.all([
-          loadScript('https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/GLTFLoader.js'),
-          loadScript('https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js')
-        ]);
-      })
-      .then(() => setScriptsLoaded(true))
-      .catch(() => setErrorMsg('ත්‍රිමාණ පද්ධති load කිරීමේ දෝෂයකි.'));
-  }, []);
-
-  // 2. Initialize 3D Engine
-  useEffect(() => {
-    if (!scriptsLoaded || !canvasRef.current) return;
-
-    const THREE = window.THREE;
-    const scene = new THREE.Scene();
-    sceneRef.current = scene;
-
-    const camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 100);
-    camera.position.set(0, 1.2, 2.5);
-    cameraRef.current = camera;
-
-    const renderer = new THREE.WebGLRenderer({
-      canvas: canvasRef.current,
-      antialias: true,
-      alpha: true
-    });
-    renderer.setSize(window.innerWidth, window.innerHeight);
-    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-    renderer.xr.enabled = true; // Enable native WebXR for Mozilla App & Android
-    rendererRef.current = renderer;
-
-    const controls = new THREE.OrbitControls(camera, renderer.domElement);
-    controls.enableDamping = true;
-    controls.maxPolarAngle = Math.PI / 2.1;
-
-    // Lights
-    scene.add(new THREE.AmbientLight(0xffffff, 0.8));
-    const dirLight = new THREE.DirectionalLight(0xffffff, 1.2);
-    dirLight.position.set(5, 10, 5);
-    scene.add(dirLight);
-
-    // Load Model or Fallback immediately if file missing
-    const loader = new THREE.GLTFLoader();
-    loader.load(
-      '/models/king_tissa.glb',
-      (gltf) => {
-        const model = gltf.scene;
-        model.position.set(0, 0, 0);
-        model.scale.set(0.8, 0.8, 0.8);
-        scene.add(model);
-        modelRef.current = model;
-        setLoadingModel(false);
-      },
-      undefined,
-      () => {
-        // FALLBACK: If .glb is not found, create a beautiful Golden Silhouette automatically
-        const group = new THREE.Group();
-        
-        const baseGeo = new THREE.CylinderGeometry(0.3, 0.35, 0.1, 32);
-        const baseMat = new THREE.MeshStandardMaterial({ color: 0x1e293b, roughness: 0.8 });
-        const base = new THREE.Mesh(baseGeo, baseMat);
-        group.add(base);
-
-        const bodyGeo = new THREE.CylinderGeometry(0.12, 0.2, 1.2, 16);
-        const bodyMat = new THREE.MeshStandardMaterial({ color: 0xd97706, roughness: 0.4, metalness: 0.2 });
-        const body = new THREE.Mesh(bodyGeo, bodyMat);
-        body.position.y = 0.65;
-        group.add(body);
-
-        const headGeo = new THREE.SphereGeometry(0.15, 16, 16);
-        const headMat = new THREE.MeshStandardMaterial({ color: 0xf59e0b, metalness: 0.6 });
-        const head = new THREE.Mesh(headGeo, headMat);
-        head.position.y = 1.3;
-        group.add(head);
-
-        scene.add(group);
-        modelRef.current = group;
-        setLoadingModel(false);
-      }
-    );
-
-    // Animation loop (Crucial for WebXR)
-    renderer.setAnimationLoop(() => {
-      if (!renderer.xr.isPresenting && modelRef.current) {
-        modelRef.current.rotation.y += 0.005; // Normal screen rotation
-        controls.update();
-      }
-      renderer.render(scene, camera);
-    });
-
-    const handleResize = () => {
-      camera.aspect = window.innerWidth / window.innerHeight;
-      camera.updateProjectionMatrix();
-      renderer.setSize(window.innerWidth, window.innerHeight);
-    };
-    window.addEventListener('resize', handleResize);
-
-    return () => {
-      window.removeEventListener('resize', handleResize);
-      renderer.setAnimationLoop(null);
-    };
-  }, [scriptsLoaded]);
-
-  // 3. Request AR Session natively (Supported by WebXR Viewer & Android Chrome)
-  const startAR = async () => {
-    if (!navigator.xr) {
-      setErrorMsg('WebXR පහසුකම හඳුනාගත නොහැකි විය.');
-      return;
-    }
-    try {
-      const session = await navigator.xr.requestSession('immersive-ar', {
-        requiredFeatures: ['local-floor']
-      });
-      rendererRef.current.xr.setSession(session);
-    } catch (err) {
-      setErrorMsg('AR Session එක ආරම්භ කිරීමට නොහැකි විය. Permission ලබා දී ඇත්දැයි බලන්න.');
-    }
-  };
-
   return (
-    <div className="relative w-screen h-screen bg-slate-950 text-slate-100 flex flex-col overflow-hidden font-sans">
-      <header className="absolute top-0 inset-x-0 z-10 p-4 bg-gradient-to-b from-slate-950/90 to-transparent flex items-center justify-between">
-        <div className="flex items-center gap-2">
-          <div className="w-8 h-8 rounded-lg bg-teal-500/10 border border-teal-500/30 flex items-center justify-center">
-            <SparklesIcon />
-          </div>
-          <div>
-            <h1 className="font-bold text-sm">Mihinthalaya AR Project</h1>
-            <p className="text-[10px] text-slate-400">දේවානම්පියතිස්ස රජතුමා (Universal WebXR)</p>
-          </div>
+    <div className="w-screen h-screen bg-slate-950 text-slate-100 flex flex-col justify-between items-center p-6 font-sans">
+      
+      {/* HEADER */}
+      <header className="w-full max-w-md flex items-center gap-3 py-4 border-b border-slate-900">
+        <div className="w-2 h-2 rounded-full bg-teal-500 animate-pulse"></div>
+        <div>
+          <h1 className="font-bold text-sm">Mihinthalaya Native AR</h1>
+          <p className="text-[10px] text-slate-400">දේවානම්පියතිස්ස රජතුමා (iOS & Android Universal)</p>
         </div>
       </header>
 
-      {errorMsg && (
-        <div className="absolute top-16 left-4 right-4 z-30 bg-red-500/10 border border-red-500/20 p-3 rounded-xl text-xs text-red-300">
-          {errorMsg}
-        </div>
-      )}
+      {/* 3D PREVIEW AREA */}
+      <div className="flex-1 w-full max-w-md flex items-center justify-center relative my-4 bg-slate-900/40 border border-slate-900 rounded-2xl overflow-hidden">
+        
+        {/* Google Model Viewer: මේක ඇතුලේ React Three Fiber නැති නිසා කිසිම crash එකක් වෙන්නේ නැහැ */}
+        <model-viewer
+          src="/models/king_tissa.glb"       // Android සහ Desktop සඳහා .glb file එක
+          ios-src="/models/king_tissa.usdz"   // ඔයාගේ iPhone එක සඳහා අනිවාර්ය .usdz file එක
+          alt="දේවානම්පියතිස්ස රජතුමා 3D Model"
+          ar
+          ar-modes="quick-look scene-viewer webxr" // iPhone වලදී native 'quick-look' එක වැඩ කරයි
+          camera-controls
+          auto-rotate
+          shadow-intensity="1.5"
+          style={{ width: '100%', height: '100%', background: 'transparent' }}
+        >
+          {/* Custom AR Button (මෙය දිස්වන්නේ ජංගම දුරකථන වල පමණි) */}
+          <button
+            slot="ar-button"
+            className="absolute bottom-6 left-1/2 -translate-x-1/2 py-3.5 px-6 bg-teal-600 hover:bg-teal-500 text-white font-bold text-xs rounded-xl shadow-2xl tracking-wide transition-all border-none cursor-pointer flex items-center gap-2"
+          >
+            <svg className="w-4 h-4 inline" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2.5">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M12 18h.01M8 21h8a2 2 0 002-2V5a2 2 0 00-2-2H8a2 2 0 00-2 2v14a2 2 0 002 2z" />
+            </svg>
+            START IPHONE AR (කාමරයට ගන්න)
+          </button>
+        </model-viewer>
 
-      <div className="absolute inset-0 w-full h-full z-0">
-        <canvas ref={canvasRef} className="w-full h-full block" />
       </div>
 
-      <section className="absolute bottom-0 inset-x-0 z-10 p-6 bg-gradient-to-t from-slate-950 via-slate-950/85 to-transparent flex flex-col items-center gap-4">
-        <div className="w-full max-w-md bg-slate-900/95 border border-slate-800/80 p-4 rounded-xl shadow-xl backdrop-blur-md text-xs text-slate-400 leading-relaxed">
-          <p className="font-bold text-slate-200 mb-1">💡 iPhone / WebXR Viewer පරිශීලකයින් සඳහා:</p>
-          ඇප් එක තුළින් ලින්ක් එකට පැමිණි පසු, පහත බොත්තම එබූ සැනින් ඔබගේ කාමරයේ පසුබිම මත රජතුමාගේ රූපය මතු වනු ඇත.
-        </div>
+      {/* BOTTOM GUIDE */}
+      <footer className="w-full max-w-md bg-slate-900 border border-slate-800/60 p-4 rounded-xl shadow-xl flex flex-col gap-1.5 mb-2">
+        <h4 className="font-bold text-xs text-slate-200">📌 iPhone පරිශීලකයින් සඳහා:</h4>
+        <p className="text-[11px] text-slate-400 leading-relaxed">
+          Vercel HTTPS ලින්ක් එකෙන් සාමාන්‍ය <strong>Safari බ්‍රවුසරයෙන්</strong>ම පිවිසෙන්න. ඉන්පසු "START IPHONE AR" බොත්තම එබූ සැනින්, කිසිදු අතිරේක ඇප් එකක් නොමැතිව iPhone එකේ නිල AR පද්ධතිය ක්‍රියාත්මක වේ.
+        </p>
+      </footer>
 
-        <button
-          onClick={startAR}
-          disabled={!scriptsLoaded}
-          className="w-full max-w-md py-3.5 px-6 bg-teal-600 hover:bg-teal-500 disabled:bg-slate-900 text-white rounded-xl font-bold text-sm shadow-lg border-none cursor-pointer flex items-center justify-center"
-        >
-          <SmartphoneIcon />
-          Start AR (රජතුමා කාමරයට ගන්න)
-        </button>
-      </section>
     </div>
   );
 }
